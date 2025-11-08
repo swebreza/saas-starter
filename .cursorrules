@@ -1,0 +1,20 @@
+# Cursor Project Guidelines
+
+## Required Context Files
+- `docs/overview.md`
+- `docs/architecture-summary.md`
+- `docs/development-playbook.md`
+- `docs/implementation-roadmap.md`
+- `docs/Hackathon.md`
+
+## Before Making Changes
+1. Read or refresh the current goal from `docs/overview.md`.
+2. Confirm architectural or flow details with `docs/architecture-summary.md`.
+3. Review implementation conventions in `docs/development-playbook.md`.
+4. If deeper context is needed, reference `docs/Hackathon.md`.
+
+## Editing Principles
+- Align all modifications with the scope and assumptions documented above.
+- Avoid implementing features or flows that contradict these references.
+- Prefer updating these docs first if project direction changes.
+
