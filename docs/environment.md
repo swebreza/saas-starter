@@ -1,60 +1,186 @@
-# Studio 24 Environment Reference
+# Studio 24 · Environment & Deployment Reference
 
-Use this checklist whenever you spin up a new environment (local, preview, or production). Secrets should live in platform-specific secret managers (Vercel, Supabase, Stripe)―never hard-code them in the repo.
+Studio 24 operates across `local`, `staging`, and `production` environments. This guide documents required tooling, environment variables, and deployment steps. Secrets live in the appropriate platform secret managers (Vercel, Supabase, n8n host, Stripe, etc.) and must never be committed.
 
-| Variable | Required | Description | Notes |
+---
+
+## 1. Tooling & Services
+
+| Service | Purpose | Environment(s) | Notes |
 | --- | --- | --- | --- |
-| `NEXT_PUBLIC_APP_URL` | ✅ | Base URL of the web app | Used by client-side routes and metadata |
-| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | Supabase project URL | Provided by Supabase dashboard |
-| `SUPABASE_ANON_KEY` | ✅ | Supabase anon key | Client-safe; required for browser auth helpers |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | Supabase service role key | **Server-only**; enables RLS migrations and background jobs |
-| `POSTGRES_URL` | ✅ | Connection string for Drizzle migrations | Use Supabase `postgres` connection or local Postgres |
-| `AUTH_SECRET` | ✅ | Secret for JWT session signing | Generate with `openssl rand -base64 32` |
-| `GEMINI_API_KEY` | ✅ | Google Gemini API key | Required for all AI studios |
-| `GEMINI_MODEL` | ⭕️ | Override the default Gemini model name | Defaults to `gemini-1.5-pro-latest` |
-| `MOCK_GEMINI` | ⭕️ | When set to `true`, returns deterministic mock data | Helpful for local development without API costs |
-| `STRIPE_SECRET_KEY` | ✅ | Stripe secret API key | Use test key locally/preview; live key in production |
-| `STRIPE_WEBHOOK_SECRET` | ✅ | Signing secret for `/api/stripe/webhook` | Unique per environment |
-| `STRIPE_PRICE_ID_PRO` | ✅ | Price ID for Premium plan | Create in Stripe dashboard |
-| `NEXT_PUBLIC_CANVA_APP_ID` | ✅ | Canva Create SDK app identifier | Provided in Canva Developer dashboard; required to launch embedded editor |
-| `CANVA_CLIENT_SECRET` | ✅ | Server-side secret for Canva OAuth token exchange | Store in Supabase or Vercel secrets; never expose to client |
-| `CANVA_REDIRECT_URI` | ✅ | OAuth redirect registered with Canva | Typically `${BASE_URL}/api/integrations/canva/callback` |
-| `CANVA_TEMPLATES_CONFIG` | ⭕️ | Optional JSON for overriding default Canva template URLs | Fallbacks live in `lib/canva/config.ts` |
-| `CANVA_AUTH_BASE_URL` | ⭕️ | Override Canva OAuth base URL | Defaults to `https://www.canva.com/api/oauth` |
-| `CANVA_SCOPES` | ⭕️ | Space-delimited Canva OAuth scopes | Defaults to `openid profile design:read design:write` |
-| `NEXT_PUBLIC_CANVA_CREATE_SDK_URL` | ⭕️ | Override for Canva Create SDK script URL | Defaults to Canva-hosted CDN |
-| `AUTO_REEL_TEMP_DIR` | ⭕️ | Filesystem folder for rendered reels | Defaults to `<repo>/temp/auto-reels` |
-| `AUTO_REEL_FONT_PATH` | ⭕️ | Absolute path to TTF/OTF font for overlays | Defaults to `public/fonts/Inter-SemiBold.ttf` if present |
-| `AUTO_REEL_POLL_INTERVAL_MS` | ⭕️ | Worker poll interval | Defaults to `5000` |
-| `AUTO_REEL_MAX_RETRIES` | ⭕️ | Maximum automatic retries before failing a job | Defaults to `2` |
-| `AUTO_REEL_WORKER_ID` | ⭕️ | Identifier for the Node worker instance | Defaults to `auto-reel-worker-<pid>` |
-| `FFMPEG_PATH` | ⭕️ | Override path to ffmpeg binary | Falls back to `@ffmpeg-installer/ffmpeg` binary |
-| `BASE_URL` | ✅ (server) | Fully-qualified base URL used in server-side redirects | Set to Vercel URL in production |
+| Vercel | Host Next.js app & marketing site | staging, production | Preview deployments enabled for PRs |
+| Supabase | Auth, Postgres, storage, scheduled functions | local (optional), staging, production | Separate project per environment |
+| n8n | Workflow automation | local docker, staging (Fly/Railway), production | Deployed via Docker image with persistent volume |
+| Stripe | Billing & invoicing | staging (test mode), production (live) | Use separate webhook secrets |
+| Redis (Upstash) | Optional cache for feature flags & rate limiting | staging, production | Can be deferred until needed |
+| Sentry/Logflare | Monitoring & logging | staging, production | Choose preferred vendor during Phase 5 |
 
-> ✅ = Required today  
-> ⭕️ = Optional until the corresponding roadmap phase goes live
+Local development can run Supabase via Docker or connect to staging Supabase (with caution). n8n can run locally using Docker Compose for workflow development.
 
-## Secrets management tips
+---
 
-- **Local development**: store secrets in `.env.local`. Never commit this file. Consider using `direnv` or 1Password CLI for team sharing.
-- **Vercel preview/production**: add variables via the Vercel dashboard. Use environment scoping (Preview vs Production) to avoid leaking live keys.
-- **Supabase**: restrict service role key usage to serverless functions and background jobs; never expose it to the client.
-- **Stripe**: rotate webhook secrets whenever you recreate endpoints. Document the webhook URLs per environment in your team wiki.
+## 2. Environment Variables
 
-For the canonical list of features that rely on each variable, see `docs/Hackathon.md` (SRS → External Interface Requirements) and `docs/implementation-roadmap.md` (phase-specific steps).
+> ✅ Required now  ⭕️ Optional/deferred until feature launch
 
-## Canva setup checklist
+### 2.1 Next.js / Vercel
+| Variable | Scope | Status | Description |
+| --- | --- | --- | --- |
+| `NEXT_PUBLIC_APP_URL` | client | ✅ | Base URL for links + metadata (`http://localhost:3000` locally) |
+| `NEXT_PUBLIC_SUPABASE_URL` | client | ✅ | Supabase project URL |
+| `SUPABASE_ANON_KEY` | server+client | ✅ | Supabase anon key (safe for client) |
+| `SUPABASE_SERVICE_ROLE_KEY` | server | ✅ | Service role for Supabase (protect carefully) |
+| `DATABASE_URL` | server | ✅ | Supabase Postgres connection string for Drizzle |
+| `AUTH_SECRET` | server | ✅ | Auth.js secret (`openssl rand -base64 32`) |
+| `GEMINI_API_KEY` | server | ✅ | Google Gemini key (free tier acceptable initially) |
+| `GEMINI_MODEL` | server | ⭕️ | Override model (`gemini-2.5-flash` default) |
+| `MOCK_GEMINI` | server | ⭕️ | `true` to short-circuit AI calls locally |
+| `NEXT_PUBLIC_CANVA_APP_ID` | client | ✅ | Canva App ID |
+| `CANVA_CLIENT_SECRET` | server | ✅ | Canva OAuth client secret |
+| `CANVA_REDIRECT_URI` | server | ✅ | `${BASE_URL}/api/integrations/canva/callback` |
+| `CANVA_SCOPES` | server | ⭕️ | Space-separated scopes; defaults to recommended set |
+| `CANVA_API_BASE_URL` | server | ⭕️ | If Canva exposes region-specific endpoints |
+| `REMOTION_SITE_ID` | server | ✅ | Site ID generated by `remotion lambda sites create` |
+| `REMOTION_SERVE_URL` | server | ⭕️ | Alternative to site ID if hosting bundle manually |
+| `REMOTION_AWS_REGION` | server | ✅ | AWS region for Remotion Lambda renders |
+| `REMOTION_AWS_ACCESS_KEY_ID` | server | ✅ | Programmatic AWS access key for Remotion Lambda |
+| `REMOTION_AWS_SECRET_ACCESS_KEY` | server | ✅ | Programmatic AWS secret key |
+| `REMOTION_MAX_CONCURRENCY` | server | ⭕️ | Optional cap on concurrent renders |
+| `REMOTION_OUTPUT_BUCKET` | server | ⭕️ | Custom S3 bucket for rendered assets (if overriding default) |
+| `N8N_BASE_URL` | server | ✅ | URL to n8n instance (with trailing slash) |
+| `N8N_ACCESS_TOKEN` | server | ✅ | Personal access token/service token for n8n REST API |
+| `N8N_WEBHOOK_SECRET` | server | ✅ | Shared secret to verify inbound n8n webhooks |
+| `STRIPE_SECRET_KEY` | server | ✅ | Stripe secret (test or live) |
+| `STRIPE_WEBHOOK_SECRET` | server | ✅ | Stripe webhook signing secret |
+| `STRIPE_PRICE_ID_PRO` | server | ✅ | Price ID for Pro plan |
+| `STRIPE_PRICE_ID_AGENCY` | server | ✅ | Price ID for Agency plan |
+| `STRIPE_USAGE_PRODUCT_ID` | server | ⭕️ | Product for metered post credits |
+| `BASE_URL` | server | ✅ | Fully qualified URL for callbacks (e.g., `https://staging.studio24.app`) |
+| `NEXT_PUBLIC_SENTRY_DSN` | client | ⭕️ | When error monitoring is enabled |
+| `SENTRY_AUTH_TOKEN` | server | ⭕️ | Deploy-time token for uploading source maps |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | server | ⭕️ | Required once Redis caching is used |
+| `FEATURE_FLAGS` | server | ⭕️ | JSON string for toggling beta features (or use Supabase table) |
 
-- Register the Studio 24 Canva integration at https://www.canva.dev/ and capture the `appId`, client secret, and redirect URI.
-- For local development, use `http://localhost:3000/api/integrations/canva/callback` as the redirect and add `http://localhost:3000` to the allowed origins list.
-- When hosting the Create SDK bundle yourself, set Canva’s “Development bundle URL” to `http://localhost:3000/canva/app.js` (or your chosen path) and update `NEXT_PUBLIC_CANVA_CREATE_SDK_URL` if you override the default.
-- Add the scopes you request in `CANVA_SCOPES` and ensure they match the integration’s configuration in the Canva developer portal.
-- Document all production URLs in the team wiki so the Canva review team can verify the integration.
+### 2.2 n8n Instance
+Set via environment variables / `.env` on n8n host:
+- `N8N_PORT` (default `5678`)
+- `N8N_ENCRYPTION_KEY` (generate once, keep secret)
+- `N8N_BASIC_AUTH_ACTIVE=true` (for UI) + `N8N_BASIC_AUTH_USER/PASSWORD`
+- `N8N_DIAGNOSTICS_ENABLED=false`
+- `N8N_PAYLOAD_SIZE_MAX=32` (MB, adjust if required)
+- `SUPABASE_SERVICE_ROLE_KEY` (for direct Supabase node access if needed)
+- `REMOTION_SITE_ID`, `REMOTION_AWS_REGION`, `REMOTION_AWS_ACCESS_KEY_ID`, `REMOTION_AWS_SECRET_ACCESS_KEY`
+- `CANVA_CLIENT_ID`, `CANVA_CLIENT_SECRET`
+- Integrations credentials managed inside n8n credential store.
 
-## Auto reels setup checklist
+### 2.3 Supabase Config
+Via Supabase dashboard/CLI:
+- API keys (anon, service-role) already captured above.
+- Enable extensions: `pgcrypto`, `uuid-ossp`.
+- Configure Storage buckets: `media`, `exports`, `tmp`.
+- Edge functions environment (once used) hold minimal secrets (e.g., analytics).
 
-- (Required) Install local dependencies via `pnpm install` (installs `@ffmpeg-installer/ffmpeg`, `fluent-ffmpeg`, `ytdl-core`).
-- Optional: set `AUTO_REEL_TEMP_DIR` if you prefer a different storage directory; otherwise reels live under `temp/auto-reels`.
-- Optional: set `AUTO_REEL_FONT_PATH` to point at a brand font for `drawtext` overlays.
-- Run the worker locally with `pnpm auto-reel:worker` after starting the Next.js dev server.
-- When deploying, provision a lightweight VM/worker (Fly.io, Render, etc.) that can run the polling script and access the same Postgres + storage. Adjust `AUTO_REEL_WORKER_ID` as needed for observability.
+---
+
+## 3. Local Development Setup
+
+1. **Install dependencies**
+   ```bash
+   pnpm install
+   ```
+2. **Create `.env.local`**
+   ```bash
+   cp .env.example .env.local
+   ```
+   Populate with keys (use Supabase & Stripe test creds, Gemini free key, optional mock flags).
+3. **Optional local Supabase**
+   - Install Supabase CLI (`brew install supabase/tap/supabase`).
+   - Run `supabase start` to spin up Postgres/auth/storage locally.
+   - Update `.env.local` `DATABASE_URL` & Supabase keys accordingly.
+4. **Optional local n8n**
+   ```bash
+   docker compose -f docker-compose.n8n.yml up
+   ```
+   or install globally (`npx n8n`) and run with `.env.n8n.local`.
+5. **Run dev server**
+   ```bash
+   pnpm dev
+   ```
+6. **Run worker scripts (when applicable)**
+   - Automation worker replaced by n8n; no separate Node worker required.
+   - For legacy local video rendering tests, run `pnpm auto-reel:worker` (optional).
+
+---
+
+## 4. Deployment Checklist
+
+### 4.1 Supabase
+- Create project per environment.
+- Run migrations via `pnpm db:migrate` (Drizzle) or Supabase CLI.
+- Apply RLS policies (`supabase db push`).
+- Seed baseline data (plan features, workflow templates, brand defaults) using `scripts/seed-workspace.ts`.
+
+### 4.2 n8n
+- Deploy container (Fly.io, Railway, Render). Mount persistent volume.
+- Set environment variables and SSL configuration.
+- Import workflows from `workflows/n8n/*.json` (staging first, then production).
+- Configure credentials (Supabase, Stripe, Gemini, Canva, Remotion Worker, social OAuth apps).
+- Lock down UI with basic auth; restrict IP if possible.
+
+### 4.3 Stripe
+- Create products/prices for plans and metered add-ons.
+- Configure webhook endpoint: `https://<env>.studio24.app/api/webhooks/stripe`.
+- Set up customer portal configuration (if offering self-service).
+
+### 4.4 Social Integrations
+- Register OAuth apps for each platform (YouTube, Meta, TikTok, LinkedIn, X).
+- Configure redirect URIs: `https://<env>.studio24.app/api/integrations/<provider>/callback`.
+- Store client IDs/secrets in environment variables or Supabase secret store.
+
+### 4.5 Monitoring
+- Set up Sentry/Logflare accounts; configure DSNs/integrations.
+- Configure uptime monitoring for Next.js and n8n endpoints.
+- Define alert channels (Slack/Email) for automation failures and billing issues.
+
+---
+
+## 5. Secret Management Practices
+
+- **Local**: `.env.local` (gitignored). Consider `direnv` or 1Password CLI for secure sharing.
+- **Vercel**: Use per-environment secrets; avoid reusing production secrets in preview.
+- **Supabase**: Store service role key and encryption helper secrets in Supabase configuration, never expose to client.
+- **n8n**: Use credential store with encryption key and limit staff access.
+- **Rotation**: Document rotation cadence (Gemini monthly, Stripe yearly, social tokens per platform); automate where possible.
+
+---
+
+## 6. Integration Checklists
+
+### 6.1 Canva
+- Register app on https://www.canva.dev/.
+- Configure redirect URIs (`/api/integrations/canva/callback`).
+- Request required scopes (defaults: `openid profile design:read design:write`).
+- Store App ID + secret in environment variables.
+- For embedded editor, optionally host Canva SDK or use CDN (`NEXT_PUBLIC_CANVA_CREATE_SDK_URL`).
+
+### 6.2 Remotion Worker
+- Deploy Remotion site (`npx remotion lambda sites create`) and record `REMOTION_SITE_ID`.
+- Configure AWS credentials and region variables; document limits in `docs/remotion.md`.
+- Optionally set `REMOTION_MAX_CONCURRENCY` and `REMOTION_OUTPUT_BUCKET` for cost control.
+
+### 6.3 Social Platforms
+- Ensure each OAuth app has appropriate scopes (publish + analytics).
+- Implement token refresh endpoints in Next.js; n8n must never store refresh tokens permanently.
+- Track rate-limit headers; throttle n8n workflows as needed.
+
+---
+
+## 7. Troubleshooting
+
+- **CORS/Redirect Issues**: Confirm `BASE_URL` matches deployed domain. Update Canva/social app settings if URLs change.
+- **Supabase Auth Errors**: Check RLS policies and ensure service role key is available for backend calls only.
+- **n8n Webhook Failures**: Verify `N8N_WEBHOOK_SECRET` matches between Next.js and n8n webhook nodes; inspect n8n execution log.
+- **Stripe Webhook Timeouts**: Stripe requires 10s response; handle events asynchronously if needed.
+- **High AI Costs**: Use `MOCK_GEMINI=true` locally; monitor `automation_runs.cost_estimate` for spikes.
+
+Keep this document current as integrations or infrastructure change. It is the single source of truth for environment configuration.

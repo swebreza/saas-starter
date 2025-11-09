@@ -1,197 +1,304 @@
-# Studio 24 Detailed Architecture Blueprint
+# Studio 24 · Detailed Architecture
 
-This document translates the Studio 24 objectives into a concrete system design that builds on the existing SaaS Starter codebase while steering it toward the AI Content Studio MVP described in `docs/Hackathon.md`, `docs/overview.md`, and `docs/architecture-summary.md`.
-
----
-
-## 1. Vision Recap
-
-Studio 24 enables creators to move from idea → text copy → repurposed video scripts → Canva-ready storyboards in under five minutes. The MVP relies on:
-
-- **Gemini API** for all AI authored content.
-- **Canva** via curated templates for design and video finishing.
-- **Stripe** for monetisation (Free vs Pro).
-- **Supabase/Postgres** (or equivalent) for auth, persistence, and usage metering.
-- **Vercel-hosted Next.js (App Router)** as the orchestration layer.
-
-The product must stay API driven, serverless, and profitable (>80% margin) by offloading heavy compute to managed services.
+This document defines the canonical system design for Studio 24. It captures the structure of the rebuilt codebase, service boundaries, workflow orchestration, data model, and operational expectations. Any architectural change must be reflected here before implementation.
 
 ---
 
-## 2. Current Codebase Assessment
+## 1. System Context
 
-The repository currently reflects a generalized SaaS starter kit with team collaboration primitives. Key observations:
+```
+[Browser UI / Next.js] ── HTTPS ──> [Next.js API Routes] ──> [Supabase Postgres + Storage]
+        │                                │                           │
+        │                                │                           ├─ Supabase Auth (JWT, RLS)
+        │                                │                           └─ Supabase Edge Functions / Cron
+        │                                │
+        │                                ├─> [n8n Automation Hub] ──> [Social APIs, Slack/Gmail, Remotion Worker]
+        │                                │
+        │                                ├─> [Gemini API] (copy/ideation)
+        │                                ├─> [Canva API] (visual templates)
+        │                                ├─> [Remotion Worker API] (media automation)
+        │                                └─> [Stripe API] (billing)
+        │
+        └─ Optional embedded Canva editor (iframe) for asset editing
+```
 
-### 2.1 Frontend (`app/`)
-- **Routing:** Uses Next.js App Router. Landing page under `app/(dashboard)/page.tsx`. Dashboard and settings flow under `app/(dashboard)/dashboard/**`.
-- **Auth Pages:** `app/(login)/sign-in` and `sign-up`.
-- **UI:** ShadCN-inspired components in `components/ui` with Tailwind 4.1 (via PostCSS).
-- **State:** SWR used globally with preloaded `/api/user` and `/api/team` data in `app/layout.tsx`.
-
-### 2.2 Backend (`app/api/**`)
-- **Auth & User:** `/api/user` exposes the authenticated profile.
-- **Teams & Billing:** `/api/team`, `/api/stripe/checkout`, `/api/stripe/webhook` integrate with Stripe via helper functions in `lib/payments/stripe.ts`.
-- **Session Management:** Cookie-based JWT handled in `lib/auth/session.ts` and `middleware.ts`.
-- **Business Logic:** Currently oriented around team management (invitations, member management, subscription).
-- **Missing AI Routes:** No `text`, `video/repurpose`, or `video/storyboard` endpoints exist yet.
-
-### 2.3 Data Layer (`lib/db/**`)
-- **ORM:** Drizzle ORM with Postgres schema for `users`, `teams`, `team_members`, `activity_logs`, and `invitations`.
-- **Auth Coupling:** Users stored locally with password hashes. No Supabase integration yet.
-- **Usage Tracking:** Not implemented. No `usage_logs` or plan gating fields.
-
-### 2.4 Payments (`lib/payments`)
-- Stripe helper functions already provision checkout session, customer portal, and webhook handling. Data written back to `teams` table.
-
-### 2.5 Middleware & Actions
-- `middleware.ts` protects `/dashboard` routes and refreshes the JWT cookie.
-- Server actions in `app/(login)/actions.ts` handle signup/signin, team management, and Stripe operations.
+- **Next.js** (Vercel): Marketing site, authenticated app, server-side APIs, event emitters to n8n.
+- **Supabase**: Identity (magic link + OAuth), primary database, secure storage, scheduled jobs.
+- **n8n**: Automation runtime for campaign workflows, publishing, analytics, notifications.
+- **Gemini / Canva / Remotion Worker**: AI + media services invoked via server-side wrappers or n8n nodes.
+- **Stripe**: Subscription billing, metered usage, invoices.
 
 ---
 
-## 3. Target Architecture Overview
+## 2. Repository Layout
 
-Studio 24 requires a lean orchestration layer with these pillars:
-
-1. **Frontend Studios** – Dashboard hub plus Text, Video Repurpose, Storyboard experiences.
-2. **Serverless API Routes** – Auth-guarded endpoints calling Gemini, enforcing plan/usage limits.
-3. **Supabase-Backed Persistence** – Profiles with `plan` field, `usage_logs`, optional `projects`.
-4. **Stripe Billing** – Free vs Pro gating, webhook-driven plan changes.
-5. **Canva Handoff** – Config-driven mapping from storyboard formats to template URLs.
-6. **Telemetry & Limits** – Log each AI call and prevent overuse for Free tier.
-
----
-
-## 4. Detailed Component Design
-
-### 4.1 Frontend Layer
-
-| Area | Current State | Target Studio 24 |
-| --- | --- | --- |
-| **Landing** | Generic SaaS marketing page | Replace messaging with Studio 24 pitch, highlight Text/Video/Storyboard flow, CTA into signup. |
-| **Dashboard** | Team subscription management | Rework as content hub showing quick actions into each studio, usage counters, upgrade CTA. |
-| **Studios** | Not present | Add pages under `app/studio/text`, `app/studio/video-repurpose`, `app/studio/storyboard`. Each page should:<br/>- Render forms per `Hackathon.md` inputs<br/>- Call respective API routes<br/>- Display results (cards, tabs, scene lists)<br/>- Provide copy/export buttons and Pro upgrade prompts |
-| **UI Components** | Buttons, cards, inputs available | Extend with tabs, code blocks, JSON copy, loading states, upgrade modals. |
-
-Implementation notes:
-- Continue using client components for interactive experiences with Suspense/SWR for server data (plan info, usage count).
-- Guard `/studio/*` routes through middleware and runtime plan checks.
-- Centralise Canva template links in `lib/config.ts` or Supabase table to avoid duplication.
-
-### 4.2 Backend API Layer
-
-#### Existing Infrastructure
-- Session resolution via `getUser()` in `lib/db/queries.ts`.
-- Stripe integration already functional.
-
-#### Required Endpoints
-| Route | Purpose | Key Steps |
-| --- | --- | --- |
-| `POST /api/text/generate` | Text Studio | Validate request body (type/topic/tone) → check plan & usage → call `gemini.generateText()` → parse variants → log usage |
-| `POST /api/video/repurpose` | Video Repurpose Studio | Validate transcript length/style → enforce Pro (or limited Free) access → call `gemini.generateRepurposeOutput()` → structure hooks/scripts/captions/summary → log usage |
-| `POST /api/video/storyboard` | Storyboard Studio | Require Pro plan → prompt Gemini for strict JSON scenes → validate response → log usage |
-| `POST /api/billing/create-checkout-session` | Upgrade flow | Use existing Stripe helper, but align success URL with new dashboard |
-| `GET /api/user/me` | Profile | Extend to return `plan`, `usageRemaining`, feature flags |
-| `GET /api/projects` (optional) | Recent work | Pull from Supabase `projects` table if history enabled |
-
-#### Gemini Integration Layer (`lib/gemini.ts`)
-- Centralise prompts, model selection, retries, and parsing.
-- Use Environment variable `GEMINI_API_KEY` and server-only fetch.
-- Ensure deterministic JSON outputs by configuring `responseMimeType: "application/json"` when available.
-
-### 4.3 Authentication & Authorization
-
-Current starter uses custom JWT cookies. To align with Studio 24 plan:
-
-- **Option A (Preferred):** Migrate to Supabase Auth or Auth.js for user management. Persist user profiles in Supabase `public.users` with `plan` column.
-- **Option B:** Keep current auth for MVP, but introduce `plan` column in `users` table and usage limits table using Drizzle. Ensure path toward Supabase compatibility is documented.
-
-Regardless of option, implement:
-- `lib/limits.ts` helper to count daily usage (`usage_logs`) and throw structured errors for `LIMIT_REACHED` or `BILLING_REQUIRED`.
-- Extend middleware to redirect Free users attempting to access Pro-only studios (or let API return 402 with frontend handling).
-
-### 4.4 Data Model
-
-Recommended schema changes (Drizzle or Supabase):
-
-| Table | Purpose | Key Columns |
-| --- | --- | --- |
-| `users` | Profile | `id`, `email`, `name`, `plan (free/pro)`, timestamps |
-| `usage_logs` | Rate limiting | `id`, `user_id`, `feature (text|video_repurpose|storyboard)`, `created_at` |
-| `projects` (optional) | Saved outputs | `id`, `user_id`, `type`, `title`, `input (jsonb)`, `output (jsonb)`, `created_at` |
-| `subscriptions` (optional) | Stripe mirroring | `stripe_customer_id`, `stripe_subscription_id`, `status`, `current_period_end` |
-| `canva_templates` (optional) | Handoff config | `format`, `url`, `is_active` |
-
-Migration path:
-1. Add `plan` column to `users` with default `'free'`.
-2. Create `usage_logs` table and associated index on `(user_id, created_at)`.
-3. Update handlers to insert usage row after successful AI call.
-4. For Supabase adoption, align table definitions with `docs/Hackathon.md` schema guidance.
-
-### 4.5 External Integrations
-
-#### Stripe
-- Keep existing checkout + portal flow.
-- Modify webhook handler to update `users.plan` (not just `teams`) and record subscription status.
-- Ensure `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ID_PRO`, `BASE_URL` are configured.
-
-#### Gemini
-- Introduce typed clients in `lib/gemini.ts`.
-- Implement error handling and fallback messaging like `"Generation failed, please try again."`
-- Respect cost constraints by validating transcript length and caching if necessary.
-
-#### Canva
-- No server-side integration required. Provide mapping from storyboard format to template URL.
-- On frontend, show CTA buttons that open Canva links in new tab. Optional: embed via iframe if allowed.
+```
+app/
+  (marketing)/
+  (auth)/sign-in|sign-up
+  (dashboard)/
+    layout.tsx
+    page.tsx                  # Workspace overview
+  studio/
+    launchpad/page.tsx        # Campaign wizard
+    calendar/page.tsx         # Calendar + kanban
+    automation/page.tsx       # Workflow cockpit
+    analytics/page.tsx        # Insight hub
+  settings/
+    workspace/page.tsx
+    integrations/page.tsx
+    billing/page.tsx
+components/
+  analytics/*
+  automation/*
+  calendar/*
+  forms/*
+  layouts/*
+  navigation/*
+  ui/*                        # Shared Tailwind/ShadCN primitives
+lib/
+  auth/*                      # Auth.js + Supabase helpers
+  supabase/*                  # Server/client utilities, RLS helpers
+  db/
+    schema.ts                 # Drizzle schema (mirrors Supabase SQL)
+    migrations/*.sql
+  limits.ts                   # Plan quotas & enforcement
+  gemini/{prompts.ts,client.ts,parsers.ts}
+  canva/{client.ts,templates.ts}
+  remotion/{client.ts,types.ts}
+  workflows/{n8n.ts,events.ts}
+  social/{youtube.ts,instagram.ts,tiktok.ts,linkedin.ts,x.ts}
+  stripe/{client.ts,webhook.ts}
+app/api/
+  auth/*
+  content/*
+  media/*
+  workflows/*
+  analytics/*
+  billing/*
+  integrations/*
+  webhooks/
+    n8n/route.ts
+    stripe/route.ts
+    social/*
+workflows/
+  n8n/
+    campaign-launch.json
+    asset-production.json
+    scheduler.json
+    analytics-sync.json
+    notifications.json
+  README.md                   # workflow promotion instructions
+scripts/
+  reset-local-env.ts
+  seed-workspace.ts
+.github/workflows/
+  lint-test.yml
+  deploy-workflows.yml        # ships n8n JSON to staging/prod
+```
 
 ---
 
-## 5. Security, Reliability, Performance
+## 3. Authentication & Authorization
 
-- **Secrets:** Store all API keys in Vercel environment variables. Never expose on client.
-- **Input Validation:** Use Zod schemas on every API route before calling external services.
-- **Error Responses:** Standardize on `{ success: false, error: { code, message } }`.
-- **Rate Limits:** Free users limited to 10 AI calls/day across all features; Pro users higher soft cap.
-- **Session Handling:** Refresh session cookies on GET (already implemented) and clear on auth errors.
-- **Monitoring:** Use Vercel logs for API errors, Supabase/Stripe dashboards for failures.
-- **Cost Control:** Track `usage_logs` counts for analytics and alerting once thresholds near plan limits.
-
----
-
-## 6. Deployment & DevOps Alignment
-
-- **Hosting:** Continue with Vercel for both frontend and API routes. Ensure environment variables align with `docs/deployment-playbook`.
-- **Database:** Connect Drizzle to Supabase-managed Postgres (replace `POSTGRES_URL` with Supabase connection string). Run migrations via `drizzle-kit`.
-- **Testing:** Locally stub Gemini responses or toggle a `MOCK_GEMINI=true` flag to avoid API costs.
-- **CI/CD:** GitHub → Vercel auto deploy. Add smoke tests (e.g., hitting `/api/text/generate` with mock key).
-- **Backups:** Rely on Supabase automated backups; export Stripe customer/subscription data as needed.
+- **Provider**: Supabase Auth for identity. Auth.js (`next-auth`) uses the Supabase adapter to manage sessions inside Next.js.
+- **Session**: JWT stored in HttpOnly cookie, rotated via Auth.js. `middleware.ts` blocks access to `/dashboard` and `/studio` for unauthenticated requests.
+- **Workspaces**: Multi-tenant structure.
+  - `workspaces`: metadata for each brand/company.
+  - `workspace_members`: user membership with roles (`owner`, `editor`, `viewer`).
+  - `invitations`: pending invites with email + token.
+- **Integrations**: `workspace_integrations` states (connected, pending, error). Credentials stored encrypted in `credentials` table (pgcrypto) scoped to workspace.
+- **Plan Enforcement**: `lib/limits.ts` exports `assertWithinPlan(userId|workspaceId, featureKey)` used in every API route. Quotas reset via scheduled job.
+- **Scopes**: Fine-grained feature flags for beta modules stored in `plan_features` table and cached in Redis (optional).
 
 ---
 
-## 7. Gap Analysis & Roadmap
+## 4. Data Model (Supabase / Drizzle)
 
-| Area | Current | Required Work |
-| --- | --- | --- |
-| **AI Features** | None | Implement `/api/text/generate`, `/api/video/repurpose`, `/api/video/storyboard`, plus corresponding UI pages. |
-| **Auth/Plan** | Team-based roles, no usage limits | Add `plan` to `users`, `usage_logs`, gating helpers, upgrade flow tied to individual account rather than team. |
-| **Database** | Local Postgres, team-centric tables | Introduce tables from Section 4.4. De-emphasize team features unless needed for future multi-user plan. |
-| **Dashboard UX** | Subscription + team mgmt | Replace with Studio 24 control center showing generative history, CTA into studios, usage counter, upgrade prompts. |
-| **Docs Alignment** | Starter template docs | Completed docs (`overview`, `architecture-summary`, `development-playbook`, this document) ensure Cursor references correct vision. |
-| **Security** | Basic session refresh | Add structured error handling, limit enforcement, secure environment configuration. |
-| **Canva Handoff** | Absent | Create `lib/config.ts` (or DB table) mapping storyboard formats to Canva template URLs, integrate in Storyboard UI. |
+All IDs are UUID. Timestamps default to `now()`. RLS ensures row-level tenant isolation.
+
+### Core Tables
+- `users` — `id`, `email`, `name`, `avatar_url`, `plan (free|pro|agency)`, `stripe_customer_id`, `onboarded_at`.
+- `workspaces` — `id`, `name`, `slug`, `primary_brand_id`, `created_by`.
+- `workspace_members` — `id`, `workspace_id`, `user_id`, `role`, `status`.
+- `workspace_integrations` — `id`, `workspace_id`, `provider`, `status`, `credential_id`, `metadata`.
+- `credentials` — `id`, `provider`, `workspace_id`, `encrypted_value`, `refresh_token`, `expires_at`.
+- `brands` — `id`, `workspace_id`, `name`, `voice`, `tone`, `fonts`, `colors`, `default_platforms`, `guidelines`.
+
+### Campaign & Asset Tables
+- `campaigns` — `id`, `workspace_id`, `brand_id`, `title`, `objective`, `status (draft|producing|scheduled|completed)`, `launch_date`, `timezone`.
+- `campaign_inputs` — `id`, `campaign_id`, `audience`, `offer`, `platforms`, `tone`, `source_assets (jsonb)`, `notes`.
+- `campaign_assets` — `id`, `campaign_id`, `type (copy|image|video|report)`, `status`, `source (gemini|canva|remotion|manual)`, `payload (jsonb)`, `storage_path`.
+- `campaign_tasks` — `id`, `campaign_id`, `task_type`, `assigned_to`, `due_at`, `completed_at`.
+
+### Automation Tables
+- `automation_runs` — `id`, `workspace_id`, `workflow_key`, `triggered_by`, `status (queued|running|succeeded|failed|cancelled)`, `n8n_execution_id`, `input (jsonb)`, `output (jsonb)`, `cost_estimate`.
+- `automation_events` — `id`, `run_id`, `event_type`, `payload`, `logged_at`.
+- `scheduled_posts` — `id`, `workspace_id`, `campaign_id`, `platform`, `status`, `scheduled_at`, `published_at`, `platform_post_id`, `error_message`.
+
+### Analytics Tables
+- `analytics_metrics` — `id`, `workspace_id`, `platform`, `metric_key`, `metric_value`, `recorded_at`, `dimensions (jsonb)` (e.g. post_id, account_id).
+- `analytics_insights` — `id`, `workspace_id`, `insight_type`, `headline`, `description`, `supporting_data (jsonb)`, `generated_at`.
+- `reports` — `id`, `workspace_id`, `title`, `period_start`, `period_end`, `filters (jsonb)`, `data (jsonb)`.
+
+### Billing & Usage
+- `subscriptions` — `id`, `workspace_id`, `plan`, `stripe_subscription_id`, `status`, `current_period_end`, `seat_limit`, `post_credit_limit`.
+- `usage_counters` — `id`, `workspace_id`, `feature_key`, `period_start`, `period_end`, `count`.
+- `billing_events` — `id`, `workspace_id`, `stripe_event_id`, `payload`, `processed_at`.
+
+### Audit & Notifications
+- `notifications` — `id`, `workspace_id`, `recipient_id`, `category`, `title`, `body`, `cta`, `read_at`.
+- `audit_logs` — `id`, `workspace_id`, `actor_id`, `action`, `target_type`, `target_id`, `metadata`.
+
+Detailed schema with column types, indexes, and RLS policies is maintained in `lib/db/schema.ts` and Supabase migration scripts.
 
 ---
 
-## 8. Next Steps
+## 5. Automation Workflows (n8n)
 
-1. **Schema Update:** Add `plan`, `usage_logs`, `projects` tables via Drizzle migration; seed initial data.
-2. **Gemini Wrapper:** Implement `lib/gemini.ts` with typed functions for text, repurpose, storyboard outputs.
-3. **API Routes:** Build AI route handlers with validation, plan checks, and usage logging.
-4. **Frontend Studios:** Create pages and UI for each studio, wire to APIs, add copy/export/upgrade UX.
-5. **Dashboard Refresh:** Replace current team settings view with Studio 24 overview and integrate usage stats/history.
-6. **Stripe Integration Update:** Ensure webhooks update `users.plan`; adjust checkout success redirect to new dashboard.
-7. **Canva Config:** Add template mapping file/table and integrate into Storyboard CTA.
-8. **Testing & Observability:** Add logging, mock configuration, and QA scripts to validate rate limits and AI responses.
+Workflows live in `workflows/n8n/*.json`. They must be version-controlled and deployed via CI (`deploy-workflows.yml`).
 
-Following this blueprint keeps development tightly aligned with the documented business goals while leveraging the existing starter foundation for rapid delivery.
+### 5.1 Campaign Launch (`campaign-launch.json`)
+1. **Trigger**: HTTP webhook call from `/api/content/campaign`.
+2. **Nodes**:
+   - Fetch campaign + brand from Supabase.
+   - Gemini copy ideation (HTTP node) using `campaign_inputs`.
+   - Transform output to canonical JSON.
+   - Supabase upsert into `campaign_assets`.
+   - Optional Slack/Gmail approval request.
+3. **Result**: Update `campaign.status = 'producing'`, emit events via `/api/webhooks/n8n`.
+
+### 5.2 Asset Production (`asset-production.json`)
+1. Triggered when user approves concepts.
+2. Nodes call Canva template API (image/video) and Remotion Worker (auto reels, captions).
+3. Upload media to Supabase storage; update `campaign_assets`.
+4. Notify stakeholders (Slack/email/in-app).
+
+### 5.3 Scheduler (`scheduler.json`)
+1. Triggered by `/api/workflows/schedule`.
+2. For each post:
+   - Retrieve social credentials via secure Next.js proxy.
+   - Format payload per platform rules.
+   - Schedule or publish (YouTube, Meta, TikTok, LinkedIn, X).
+   - Log success/failure in `scheduled_posts` and `automation_events`.
+
+### 5.4 Analytics Sync (`analytics-sync.json`)
+1. Cron (nightly per workspace timezone).
+2. Pull metrics from each connected platform.
+3. Store raw metrics (`analytics_metrics`), compute insights (via Gemini summariser or rule engine).
+4. Generate PDF/HTML reports on demand.
+
+### 5.5 Notifications (`notifications.json`)
+- Listens to automation events (assets ready, approvals pending, failures).
+- Routes communications via Slack, email, or in-app notifications.
+- Respects user notification preferences stored in `workspace_members`.
+
+**Retry/Observability**: All workflows set retry attempts (3x) and on-failure branch to send alerts. n8n execution IDs are mirrored in `automation_runs`.
+
+---
+
+## 6. Critical Flow Sequences
+
+### 6.1 New Campaign → Published Posts
+1. User completes Launchpad → `POST /api/content/campaign`.
+2. API validates payload (Zod), asserts plan quota, creates `campaign` + `campaign_inputs`, triggers n8n Launch workflow.
+3. n8n generates copy → webhook `/api/webhooks/n8n/campaign-result` updates assets + emits notifications.
+4. User reviews/edits copy, selects visuals (Canva/Remotion) → API triggers Asset Production workflow.
+5. User schedules posts → `POST /api/workflows/schedule` → scheduler workflow queues posts.
+6. Publishing success/failure → `/api/webhooks/n8n/workflow-event` updates `scheduled_posts` & `automation_runs`. Failures appear in Automation Cockpit with retry action.
+7. Analytics workflow pulls metrics; UI displays insights in Analytics Hub.
+
+### 6.2 Billing & Usage
+1. Upgrade CTA → `POST /api/billing/create-checkout-session` → Stripe Checkout.
+2. Stripe webhook updates `subscriptions`, recalculates `usage_counters`.
+3. `lib/limits` references plan features to enable automation quotas, seat limits, overage pricing.
+
+### 6.3 Automation Failure Recovery
+1. n8n sends failure event with run ID + error.
+2. API updates `automation_runs.status = 'failed'`, writes `automation_events`, triggers notification workflow.
+3. User clicks “Retry” → `/api/workflows/retry` clones run, replays workflow with same inputs.
+4. Observability pipeline tracks retry success rate.
+
+---
+
+## 7. Integration Contracts
+
+| Integration | Access Pattern | Auth | Notes |
+| --- | --- | --- | --- |
+| Gemini | Next.js server fetch | API key (`GEMINI_API_KEY`) | Structured prompts; JSON responses; retry with exponential backoff. |
+| Canva | OAuth redirect in-app; API calls from n8n | OAuth (per user/workspace) | Template IDs stored in `canva_templates`; fallback to open-in-Canva links if API fails. |
+| Remotion Worker | n8n HTTP node via Next.js proxy (`/api/media/remotion/*`) | AWS credentials + site ID | Used for automated video/audio renders. Documented in `docs/remotion.md`. |
+| Social APIs | n8n HTTP nodes via Next.js proxy | OAuth per platform | Refresh tokens managed by Next.js; short-lived access tokens passed to n8n run. |
+| Stripe | Next.js server fetch + webhook | Secret keys + webhook secret | Manages subscriptions, metered usage, invoices. |
+| Slack/Gmail | Optional | OAuth | For notification workflows and approvals. |
+
+Any unsupported Remotion capability must have fallback (Shotstack, custom FFmpeg). Document alternatives and selection rationale.
+
+---
+
+## 8. Environment & Deployment
+
+- **Hosting**: Vercel (Next.js), Supabase (DB/auth/storage), Fly.io or Railway (n8n container), optional Upstash Redis.
+- **Environments**: `local`, `staging`, `production` with separate Supabase/n8n instances.
+- **Secrets**: Managed via Vercel env vars and Supabase secret store. n8n credentials stored encrypted in n8n.
+- **CI/CD Pipeline**:
+  - PR: lint (`pnpm lint`), type-check (`pnpm typecheck`), unit tests (`pnpm test`).
+  - Merge to `main`: deploy to Vercel, run `pnpm db:migrate` (or Supabase CLI), deploy n8n workflows via `deploy-workflows.yml`.
+  - Feature flags toggled via Supabase config tables.
+- **Backups**: Supabase automated backups + manual exports for production; n8n export pipeline keeps workflow JSON snapshots in Git.
+- **Local Dev**: Docker Compose optional (Supabase local + n8n container). `.env.example` documents required variables. CLI script `scripts/reset-local-env.ts` resets seeds.
+
+---
+
+## 9. Security & Compliance
+
+- **Row-Level Security**: All tables enforce `workspace_id` or `user_id` filters. Helper views may expose aggregated analytics.
+- **Secrets Hygiene**: No client-side direct calls to third-party APIs requiring secrets. Use server proxies.
+- **Audit Trails**: `audit_logs` capture significant user actions (campaign changes, workflow triggers, billing updates). Logs mirrored to external sink (e.g., Logflare).
+- **Data Privacy**: Support user/workspace deletion (cascade to associated records). Document in privacy policy.
+- **API Compliance**: Respect platform guidelines (rate limits, content policies). Provide knob in workflows to label AI-generated content if required by platform.
+- **Monitoring**: Integrate Sentry (frontend + backend), n8n built-in alerts, Supabase logs. Alert on automation failure rates, billing sync errors, quota breaches.
+
+---
+
+## 10. Testing & Observability
+
+- **Testing Pyramid**:
+  - Unit: `lib/gemini`, `lib/limits`, `lib/social`, `lib/workflows`.
+  - Integration: API routes with mocked external services using MSW/supertest.
+  - Workflow Tests: n8n “dev” instance with mocked credentials; run via Postman collection or n8n CLI.
+  - E2E: Playwright covering onboarding → campaign launch → scheduling → analytics → billing upgrade.
+  - Visual Regression: Chromatic or Storybook snapshots for critical marketing/app flows.
+- **Cost Monitoring**: Record AI/automation cost estimates per run. Dashboard for monthly spend vs revenue.
+- **Logging**: Use structured logger (e.g., pino) with request IDs. n8n execution IDs stored in `automation_runs` for traceability.
+- **Alerting**: PagerDuty/Slack integration for automation failures over threshold, Stripe webhook failures, Supabase error spikes.
+
+---
+
+## 11. Implementation Alignment
+
+| Roadmap Phase | Architecture Deliverables |
+| --- | --- |
+| Phase 0 | Research reports, Remotion Worker decision, competitor analysis. |
+| Phase 1 | Complete rewrite of documentation suite (this file, overview, architecture summary, environment, playbook, roadmap, limits, Canva, Gemini, n8n, Remotion, social). |
+| Phase 2 | Auth strategy finalized, Supabase schema migrations, baseline UI shell, plan enforcement scaffolding. |
+| Phase 3 | n8n workflows authored, API endpoints for workflow orchestration, automation cockpit UI. |
+| Phase 4 | AI content engine (Gemini), Canva/Remotion integrations, brand library, asset storage. |
+| Phase 5 | Scheduling + analytics automation, Stripe metering, calendar UI, marketing site refresh. |
+| Phase 6 | QA, security review, load testing, monitoring/alerting setup, launch checklist. |
+
+---
+
+## 12. Open Questions
+
+1. **Remotion Worker Scope** – Confirm supported features (auto clipping, voiceover, captioning). If unavailable, select alternative and update docs.
+2. **Social Platform Coverage** – Minimum at launch: Instagram, Facebook, TikTok, YouTube, LinkedIn, X. Determine OAuth scope complexity and sequencing.
+3. **Marketplace/Partner Integrations** – Not in MVP but plan for Notion, Webflow, Shopify connectors; document design for future phases.
+4. **Service-Level Agreements** – Define uptime/response time commitments for Agency plan (may require paid support tooling).
+
+Document answers here before implementation begins.
+
+--- 
+
+This architecture is the single source of truth for Studio 24. Keep it current as the system evolves.
 

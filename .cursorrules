@@ -3,22 +3,28 @@
 ## Required Context Files
 
 - `docs/overview.md`
+- `docs/architecture-summary.md`
 - `docs/detailed-architecture.md`
-<!-- - `docs/development-playbook.md` -->
+- `docs/environment.md`
 - `docs/implementation-roadmap.md`
-- `docs/investor-pitch.md`
-- `docs/Hackathon.md`
+- `docs/development-playbook.md`
 - `docs/limits-and-plans.md`
+- `docs/canva.md`
+- `docs/gemini.md`
+- `docs/n8n.md`
+- `docs/remotion.md`
+- `docs/social-platforms.md`
 
 ## Before Making Changes
 
-1. Read or refresh the current goal from `docs/overview.md`.
-2. Confirm architectural or flow details with `docs/architecture-summary.md`.
+1. Refresh product goals in `docs/overview.md`.
+2. Confirm architecture & flows with `docs/architecture-summary.md` and `docs/detailed-architecture.md`.
 3. Review implementation conventions in `docs/development-playbook.md`.
-4. If deeper context is needed, reference `docs/Hackathon.md`.
+4. Consult integration specifics (Canva, Gemini, n8n, Remotion Worker, social platforms) as needed.
 
 ## Editing Principles
 
-- Align all modifications with the scope and assumptions documented above.
-- Avoid implementing features or flows that contradict these references.
-- Prefer updating these docs first if project direction changes.
+- Keep docs as the source of truth—update them before shipping code.
+- Align implementation with roadmap phases in `docs/implementation-roadmap.md`.
+- Honour plan/limit rules defined in `docs/limits-and-plans.md`.
+- Prefer adjustments to documentation when project direction changes.
