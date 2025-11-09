@@ -1,119 +1,94 @@
-# Next.js SaaS Starter
+# Studio 24 – AI Campaign Studio
 
-This is a starter template for building a SaaS application using **Next.js** with support for authentication, Stripe integration for payments, and a dashboard for logged-in users.
+Studio 24 is a premium AI content studio that turns a single idea into publish-ready campaigns across TikTok, Instagram, YouTube Shorts, LinkedIn, X, and more. This repository hosts the Next.js application, Supabase schema, Stripe billing logic, and Gemini orchestration required to deliver the MVP described throughout the `/docs` directory.
 
-**Demo: [https://next-saas-start.vercel.app/](https://next-saas-start.vercel.app/)**
+> **Quick links**
+>
+> - 📘 Product strategy: [`docs/overview.md`](docs/overview.md)
+> - 🧠 Architecture & development norms: [`docs/architecture-summary.md`](docs/architecture-summary.md), [`docs/development-playbook.md`](docs/development-playbook.md)
+> - 🛣️ Delivery roadmap: [`docs/implementation-roadmap.md`](docs/implementation-roadmap.md)
+> - 🧪 Strategic dossier (BRD/PRD/SRS): [`docs/Hackathon.md`](docs/Hackathon.md)
 
-## Features
+## Core capabilities
 
-- Marketing landing page (`/`) with animated Terminal element
-- Pricing page (`/pricing`) which connects to Stripe Checkout
-- Dashboard pages with CRUD operations on users/teams
-- Basic RBAC with Owner and Member roles
-- Subscription management with Stripe Customer Portal
-- Email/password authentication with JWTs stored to cookies
-- Global middleware to protect logged-in routes
-- Local middleware to protect Server Actions or validate Zod schemas
-- Activity logging system for any user events
+- **Text Studio** – Gemini-powered hooks, captions, scripts, and outlines structured for instant export.
+- **Video Repurpose Studio** – Transcript/URL → shorts playbooks, teaser scripts, caption packs.
+- **Storyboard Studio + Canva Bridge** – Scene timelines with embedded Canva editor and one-click template handoffs.
+- **Automated Reels Rendering** – Premium users get downloadable, brand-on short-form videos.
+- **Usage-aware monetisation** – Free tier proves value; Premium lifts limits, unlocks Canva handoffs, saves projects.
 
-## Tech Stack
+## Tech stack
 
-- **Framework**: [Next.js](https://nextjs.org/)
-- **Database**: [Postgres](https://www.postgresql.org/)
-- **ORM**: [Drizzle](https://orm.drizzle.team/)
-- **Payments**: [Stripe](https://stripe.com/)
-- **UI Library**: [shadcn/ui](https://ui.shadcn.com/)
+- **Framework** – Next.js App Router (TypeScript, Tailwind)
+- **Database/Auth** – Supabase Postgres + Supabase Auth (Drizzle ORM for schema/migrations)
+- **AI** – Google Gemini (text, repurpose, storyboard, rendering prompts)
+- **Billing** – Stripe Checkout + Customer Portal
+- **Design handoff** – Canva templates maintained in `lib/canva/config.ts`
 
-## Getting Started
+## Getting started
 
 ```bash
-git clone https://github.com/nextjs/saas-starter
-cd saas-starter
+git clone https://github.com/nextjs/saas-starter studio-24
+cd studio-24
 pnpm install
 ```
 
-## Running Locally
-
-[Install](https://docs.stripe.com/stripe-cli) and log in to your Stripe account:
+Create your `.env.local` from the template and populate the variables described in [`docs/environment.md`](docs/environment.md):
 
 ```bash
-stripe login
+cp .env.example .env.local
 ```
 
-Use the included setup script to create your `.env` file:
-
-```bash
-pnpm db:setup
-```
-
-Run the database migrations and seed the database with a default user and team:
+Run database migrations and seed data required for local development:
 
 ```bash
 pnpm db:migrate
 pnpm db:seed
 ```
 
-This will create the following user and team:
-
-- User: `test@test.com`
-- Password: `admin123`
-
-You can also create new users through the `/sign-up` route.
-
-Finally, run the Next.js development server:
+Boot the app:
 
 ```bash
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser to see the app in action.
-
-You can listen for Stripe webhooks locally through their CLI to handle subscription change events:
+Launch the Auto Reels worker in a second terminal to render reels locally:
 
 ```bash
-stripe listen --forward-to localhost:3000/api/stripe/webhook
+pnpm auto-reel:worker
 ```
 
-## Testing Payments
+Rendered files land in `temp/auto-reels/<jobId>/result.mp4` and stream through the Auto Reels Studio download button once a job completes.
 
-To test Stripe payments, use the following test card details:
+Navigate to [http://localhost:3000](http://localhost:3000) to explore the marketing site and `/sign-up` to create a local account.
 
-- Card Number: `4242 4242 4242 4242`
-- Expiration: Any future date
-- CVC: Any 3-digit number
+> Prefer Supabase? Export your Supabase connection string as `POSTGRES_URL` and supply the anon/service-role keys in `.env.local`. Drizzle migrations will run against the configured database.
 
-## Going to Production
+> **Canva setup**: After registering the Studio 24 app in the Canva Developer Portal, set `NEXT_PUBLIC_CANVA_APP_ID`, `CANVA_CLIENT_SECRET`, and `CANVA_REDIRECT_URI` in `.env.local`. The embed loader pulls from `NEXT_PUBLIC_CANVA_CREATE_SDK_URL`, which defaults to Canva’s CDN. Update it if you host a custom bundle.
 
-When you're ready to deploy your SaaS application to production, follow these steps:
+## Development workflow
 
-### Set up a production Stripe webhook
+1. Revisit the documents listed above before starting any work to stay aligned with product and architectural guardrails.
+2. Implement the feature following the patterns codified in `docs/development-playbook.md`.
+3. Add or update migrations in `lib/db/migrations` when schema changes are required.
+4. Keep `/docs` as the source of truth—if behaviour changes, update the relevant doc before (or alongside) the code.
 
-1. Go to the Stripe Dashboard and create a new webhook for your production environment.
-2. Set the endpoint URL to your production API route (e.g., `https://yourdomain.com/api/stripe/webhook`).
-3. Select the events you want to listen for (e.g., `checkout.session.completed`, `customer.subscription.updated`).
+For automated local setup (Docker Postgres, Stripe CLI login, env file scaffold), run:
 
-### Deploy to Vercel
+```bash
+pnpm db:setup
+```
 
-1. Push your code to a GitHub repository.
-2. Connect your repository to [Vercel](https://vercel.com/) and deploy it.
-3. Follow the Vercel deployment process, which will guide you through setting up your project.
+Follow the prompts to provision local dependencies and generate `.env`.
 
-### Add environment variables
+## Deploying
 
-In your Vercel project settings (or during deployment), add all the necessary environment variables. Make sure to update the values for the production environment, including:
+The application is designed for Vercel + Supabase:
 
-1. `BASE_URL`: Set this to your production domain.
-2. `STRIPE_SECRET_KEY`: Use your Stripe secret key for the production environment.
-3. `STRIPE_WEBHOOK_SECRET`: Use the webhook secret from the production webhook you created in step 1.
-4. `POSTGRES_URL`: Set this to your production database URL.
-5. `AUTH_SECRET`: Set this to a random string. `openssl rand -base64 32` will generate one.
+1. Mirror the environment variables documented in [`docs/environment.md`](docs/environment.md) for preview/production.
+2. Configure Supabase (schema, RLS policies) and Stripe (product, price, webhook) using the instructions in `docs/Hackathon.md`.
+3. Deploy to Vercel and verify the smoke tests detailed in `docs/implementation-roadmap.md` Phase 8.
 
-## Other Templates
+## Contributing
 
-While this template is intentionally minimal and to be used as a learning resource, there are other paid versions in the community which are more full-featured:
-
-- https://achromatic.dev
-- https://shipfa.st
-- https://makerkit.dev
-- https://zerotoshipped.com
-- https://turbostarter.dev
+Open a PR with a concise summary, link to the relevant roadmap phase or doc section, and include any migration or environment updates. Keep branches scoped to a single roadmap slice (see `docs/implementation-roadmap.md` for guidance).

@@ -256,6 +256,8 @@ From a single dashboard, Studio 24 guides users through:
    }
    ```
    Response data: `{ "variants": [{ "label": "Option 1", "platform": "instagram", "text": "..."}] }`
+   - Errors: `UNAUTHORIZED`, `INVALID_INPUT`, `LIMIT_REACHED`, `INTERNAL_ERROR`
+   - Success payload also returns `{ usage: { plan, limit, remaining } }` for client-side quota messaging.
 3. `POST /api/video/repurpose`
    - Enforces Premium plan.
    - Response fields: `hooks[]`, `short_scripts[]`, `captions[]`, `summary_script`.

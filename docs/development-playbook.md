@@ -26,6 +26,7 @@ This playbook keeps every contributor—human or AI—building the same premium-
    - Consume the typed API contract.  
    - Provide clear loading, error, and upgrade states.  
    - Include copy/export actions and Canva handoffs where relevant.  
+   - For Canva embeds, check `user.canvaConnected` from `/api/user`, route connect flows through `/api/integrations/canva/**`, and surface save controls that POST to `/api/video/storyboard/design`.
    - Keep Tailwind classes lean; share components when patterns repeat.
 5. **Test & Validate**  
    - Run local end-to-end flows using representative prompts/transcripts.  
@@ -38,19 +39,23 @@ This playbook keeps every contributor—human or AI—building the same premium-
    - Ensure Vercel environment variables are accounted for before merging.
 
 ### Rapid QA Scenarios
-- **Text Studio**: “Draft teaser hooks for a fintech founder on LinkedIn” → expect 3+ variant cards with copy buttons and tone adherence.
-- **Video Repurpose**: Paste a 2-minute YouTube transcript → verify hooks/scripts/captions/summary tabs populate, CTA to Storyboard transfers selected script.
-- **Storyboard Studio**: Input a 60s promo script → confirm 6–10 scenes with timecodes, Canva link, JSON copy, and Premium gating for Free users.
+- **Text Studio**: “Draft teaser hooks for a fintech founder on LinkedIn” → expect 3+ variant cards with copy buttons and tone adherence. Toggle `MOCK_GEMINI=true` locally for deterministic outputs when testing UI changes.
+- **Video Repurpose**: Paste a 2-minute transcript → confirm hooks, short scripts (with runtime), captions, and summary render; Free plans should see Premium teaser + sample bundle, while Pro runs return structured JSON.
+- **Storyboard Studio**: Paste a 60–90s script → verify timeline cards (visual/overlay/voiceover/note), Canva CTA link, JSON copy, and Premium gating for Free users.
+- **Canva Bridge**: Connect Canva via `/api/integrations/canva/authorize`, confirm Create SDK loads in `/studio/storyboard`, save a design, and ensure `/api/video/storyboard/design` persists metadata.
+- **Auto Reels**: Submit a YouTube URL, run `pnpm auto-reel:worker` in a second terminal, confirm `/api/video/render-shorts` queues a job, progress updates poll successfully, and the download link streams the MP4.
 - **Plan Limits**: Execute 11 Free-plan generations in 24h → expect `{ success: false, error.code: "LIMIT_REACHED" }` and upgrade CTA surfaced in UI.
-- **Auto Reels Rendering**: Submit Premium YouTube URL → verify multiple downloads produce correct overlays/animations and inaccessible to Free plans.
+- **Auto Reels Rendering**: Allow the worker to finish, then watch the MP4 for hook overlay placement, pacing, and correct CTA text; verify Free plans cannot access downloads.
 - **Billing Flow**: Run `stripe trigger checkout.session.completed` → ensure `users.plan` flips to `pro`, dashboard and studios unlock Premium features.
 
 ### Pitfalls to Avoid
 - Triggering Gemini/Stripe/rendering services/DB from the client; all sensitive calls must remain server-side.
 - Skipping input validation, leading to unpredictable Gemini outputs or security gaps.
 - Logging entire prompts or secrets—store only metadata necessary for debugging.
-- Hardcoding Canva URLs inside components; centralize in `lib/config.ts` or the `canva_templates` table.
+- Hardcoding Canva URLs inside components; centralize in `lib/canva/config.ts` or the `canva_templates` table.
+- Bypassing Canva OAuth helpers (`lib/canva/oauth.ts`). Always use `/api/integrations/canva/*` so tokens persist and refresh correctly.
 - Ignoring error branches; every API route must map failures to user-friendly messaging.
+- Promoting builds with `MOCK_GEMINI` enabled—double-check production envs rely on real Gemini credentials.
 
 ### Collaboration Expectations
 - Keep branches focused on single roadmap items. Surface blockers early with context and proposed solutions.

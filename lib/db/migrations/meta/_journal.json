@@ -8,6 +8,41 @@
       "when": 1726443359662,
       "tag": "0000_soft_the_anarchist",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1762545600000,
+      "tag": "0001_phase0_foundation",
+      "breakpoints": false
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1762549200000,
+      "tag": "0002_phase2_usage_indexes",
+      "breakpoints": false
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1762556400000,
+      "tag": "0003_canva_integration",
+      "breakpoints": false
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1762560000000,
+      "tag": "0004_phase6_auto_reels",
+      "breakpoints": false
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1762563600000,
+      "tag": "0005_auto_reel_worker",
+      "breakpoints": false
     }
   ]
 }

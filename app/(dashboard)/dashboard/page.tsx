@@ -1,287 +1,295 @@
-'use client';
+'use client'
 
-import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import Link from 'next/link'
+import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-  CardFooter
-} from '@/components/ui/card';
-import { customerPortalAction } from '@/lib/payments/actions';
-import { useActionState } from 'react';
-import { TeamDataWithMembers, User } from '@/lib/db/schema';
-import { removeTeamMember, inviteTeamMember } from '@/app/(login)/actions';
-import useSWR from 'swr';
-import { Suspense } from 'react';
-import { Input } from '@/components/ui/input';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Label } from '@/components/ui/label';
-import { Loader2, PlusCircle } from 'lucide-react';
+  CardFooter,
+} from '@/components/ui/card'
+import useSWR from 'swr'
+import {
+  Sparkles,
+  Clapperboard,
+  LayoutDashboard,
+  Film,
+  ShieldCheck,
+  ArrowRight,
+  type LucideIcon,
+} from 'lucide-react'
 
-type ActionState = {
-  error?: string;
-  success?: string;
-};
+const fetcher = (url: string) => fetch(url).then((res) => res.json())
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+type ApiUser = {
+  id: number
+  name: string | null
+  email: string
+  role: string
+  plan: 'free' | 'pro'
+  usage: {
+    used: number
+    limit: number | null
+    remaining: number | null
+  } | null
+} | null
 
-function SubscriptionSkeleton() {
-  return (
-    <Card className="mb-8 h-[140px]">
-      <CardHeader>
-        <CardTitle>Team Subscription</CardTitle>
-      </CardHeader>
-    </Card>
-  );
+type StudioCard = {
+  key: string
+  title: string
+  description: string
+  href: string
+  icon: LucideIcon
+  status: 'live' | 'coming-soon'
+  premium?: boolean
 }
 
-function ManageSubscription() {
-  const { data: teamData } = useSWR<TeamDataWithMembers>('/api/team', fetcher);
+const studios: StudioCard[] = [
+  {
+    key: 'text',
+    title: 'Text Studio',
+    description:
+      'Spin up hooks, captions, scripts, and outlines tuned to your brand voice in seconds.',
+    href: '/studio/text',
+    icon: Sparkles,
+    status: 'live',
+  },
+  {
+    key: 'video',
+    title: 'Video Repurpose Studio',
+    description:
+      'Drop in a transcript or YouTube link and get shorts playbooks, teaser scripts, and caption packs.',
+    href: '/studio/video-repurpose',
+    icon: Clapperboard,
+    status: 'live',
+    premium: true,
+  },
+  {
+    key: 'storyboard',
+    title: 'Storyboard Studio',
+    description:
+      'Turn scripts into scene timelines with Canva handoffs so creative teams can export fast.',
+    href: '/studio/storyboard',
+    icon: LayoutDashboard,
+    status: 'live',
+    premium: true,
+  },
+  {
+    key: 'auto-reels',
+    title: 'Auto Reels Rendering',
+    description:
+      'Send long-form clips to our managed renderer for premium shorts with captions and motion graphics.',
+    href: '/studio/auto-reels',
+    icon: Film,
+    status: 'live',
+    premium: true,
+  },
+]
+
+function StudioCardItem({
+  studio,
+  plan,
+}: {
+  studio: StudioCard
+  plan: 'free' | 'pro'
+}) {
+  const Icon = studio.icon
+  const isPremium = studio.premium === true
+  const isLocked = isPremium && plan !== 'pro'
+  const isLive = studio.status === 'live'
+  const isComingSoon = studio.status === 'coming-soon'
 
   return (
-    <Card className="mb-8">
+    <Card className='h-full border border-gray-200 shadow-sm'>
       <CardHeader>
-        <CardTitle>Team Subscription</CardTitle>
+        <div className='flex items-center justify-between gap-3'>
+          <div className='flex items-center gap-2'>
+            <Icon className='h-5 w-5 text-orange-500' />
+            <CardTitle className='text-lg font-semibold text-gray-900'>
+              {studio.title}
+            </CardTitle>
+          </div>
+          <span className='rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-600'>
+            {isLive
+              ? isPremium
+                ? 'Premium'
+                : 'Live'
+              : isPremium
+              ? 'Premium · Soon'
+              : 'Coming soon'}
+          </span>
+        </div>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
-            <div className="mb-4 sm:mb-0">
-              <p className="font-medium">
-                Current Plan: {teamData?.planName || 'Free'}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {teamData?.subscriptionStatus === 'active'
-                  ? 'Billed monthly'
-                  : teamData?.subscriptionStatus === 'trialing'
-                  ? 'Trial period'
-                  : 'No active subscription'}
-              </p>
-            </div>
-            <form action={customerPortalAction}>
-              <Button type="submit" variant="outline">
-                Manage Subscription
-              </Button>
-            </form>
-          </div>
-        </div>
+        <p className='text-sm text-gray-600 leading-relaxed'>
+          {studio.description}
+        </p>
       </CardContent>
+      <CardFooter>
+        {isLive && !isLocked ? (
+          <Button asChild className='rounded-full'>
+            <Link href={studio.href}>
+              Open studio
+              <ArrowRight className='ml-2 h-4 w-4' />
+            </Link>
+          </Button>
+        ) : isComingSoon ? (
+          <Button
+            variant='outline'
+            className='rounded-full border-dashed'
+            disabled
+          >
+            Coming soon
+          </Button>
+        ) : (
+          <Button
+            asChild
+            variant='outline'
+            className='rounded-full border-dashed'
+          >
+            <Link href='/pricing'>
+              Upgrade to unlock
+              <ArrowRight className='ml-2 h-4 w-4' />
+            </Link>
+          </Button>
+        )}
+      </CardFooter>
     </Card>
-  );
+  )
 }
 
-function TeamMembersSkeleton() {
+export default function DashboardPage() {
+  const { data: user } = useSWR<ApiUser>('/api/user', fetcher)
+  const plan = user?.plan ?? 'free'
+  const planLabel = plan === 'pro' ? 'Premium' : 'Free'
+  const usage = user?.usage
+
   return (
-    <Card className="mb-8 h-[140px]">
-      <CardHeader>
-        <CardTitle>Team Members</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="animate-pulse space-y-4 mt-1">
-          <div className="flex items-center space-x-4">
-            <div className="size-8 rounded-full bg-gray-200"></div>
-            <div className="space-y-2">
-              <div className="h-4 w-32 bg-gray-200 rounded"></div>
-              <div className="h-3 w-14 bg-gray-200 rounded"></div>
+    <main className='flex-1 p-4 lg:p-8 space-y-8'>
+      <Card className='overflow-hidden border-none bg-gray-900 text-white'>
+        <CardContent className='px-6 py-8 lg:px-10'>
+          <div className='flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between'>
+            <div className='space-y-3'>
+              <span className='inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-xs font-semibold tracking-wide uppercase text-orange-200'>
+                Creator Command Center
+              </span>
+              <h1 className='text-3xl lg:text-4xl font-semibold'>
+                Ship campaigns in minutes, not weeks.
+              </h1>
+              <p className='text-sm lg:text-base text-white/80 leading-relaxed'>
+                Rally your team around Studio 24’s AI studios. Generate copy,
+                storyboard visuals, and queue renders without leaving the
+                dashboard.
+              </p>
+            </div>
+            <div className='flex flex-col gap-3'>
+              <div className='rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-medium'>
+                <div className='text-white/70'>Current plan</div>
+                <div className='mt-1 text-lg text-white'>{planLabel}</div>
+                {usage && usage.limit !== null && usage.remaining !== null ? (
+                  <div className='mt-2 text-xs text-white/70'>
+                    {usage.remaining} of {usage.limit} generations remaining
+                    today
+                  </div>
+                ) : null}
+              </div>
+              {plan === 'free' ? (
+                <Button
+                  asChild
+                  className='rounded-full bg-white text-gray-900 hover:bg-gray-100'
+                >
+                  <Link href='/pricing'>
+                    Upgrade for unlimited studios
+                    <ArrowRight className='ml-2 h-4 w-4' />
+                  </Link>
+                </Button>
+              ) : (
+                <Button
+                  asChild
+                  variant='outline'
+                  className='rounded-full border-white/40 text-black hover:bg-white/10 hover:text-white'
+                >
+                  <Link href='/settings'>
+                    Manage plan
+                    <ArrowRight className='ml-2 h-4 w-4' />
+                  </Link>
+                </Button>
+              )}
             </div>
           </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function TeamMembers() {
-  const { data: teamData } = useSWR<TeamDataWithMembers>('/api/team', fetcher);
-  const [removeState, removeAction, isRemovePending] = useActionState<
-    ActionState,
-    FormData
-  >(removeTeamMember, {});
-
-  const getUserDisplayName = (user: Pick<User, 'id' | 'name' | 'email'>) => {
-    return user.name || user.email || 'Unknown User';
-  };
-
-  if (!teamData?.teamMembers?.length) {
-    return (
-      <Card className="mb-8">
-        <CardHeader>
-          <CardTitle>Team Members</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-muted-foreground">No team members yet.</p>
         </CardContent>
       </Card>
-    );
-  }
 
-  return (
-    <Card className="mb-8">
-      <CardHeader>
-        <CardTitle>Team Members</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ul className="space-y-4">
-          {teamData.teamMembers.map((member, index) => (
-            <li key={member.id} className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <Avatar>
-                  {/* 
-                    This app doesn't save profile images, but here
-                    is how you'd show them:
-
-                    <AvatarImage
-                      src={member.user.image || ''}
-                      alt={getUserDisplayName(member.user)}
-                    />
-                  */}
-                  <AvatarFallback>
-                    {getUserDisplayName(member.user)
-                      .split(' ')
-                      .map((n) => n[0])
-                      .join('')}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="font-medium">
-                    {getUserDisplayName(member.user)}
-                  </p>
-                  <p className="text-sm text-muted-foreground capitalize">
-                    {member.role}
-                  </p>
-                </div>
-              </div>
-              {index > 1 ? (
-                <form action={removeAction}>
-                  <input type="hidden" name="memberId" value={member.id} />
-                  <Button
-                    type="submit"
-                    variant="outline"
-                    size="sm"
-                    disabled={isRemovePending}
-                  >
-                    {isRemovePending ? 'Removing...' : 'Remove'}
-                  </Button>
-                </form>
-              ) : null}
-            </li>
+      <section className='space-y-4'>
+        <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+          <div>
+            <h2 className='text-xl font-semibold text-gray-900'>
+              Studios & workflows
+            </h2>
+            <p className='text-sm text-gray-600'>
+              Launch the right studio for where you are in the content
+              lifecycle.
+            </p>
+          </div>
+        </div>
+        <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-3'>
+          {studios.map((studio) => (
+            <StudioCardItem key={studio.key} studio={studio} plan={plan} />
           ))}
-        </ul>
-        {removeState?.error && (
-          <p className="text-red-500 mt-4">{removeState.error}</p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
+        </div>
+      </section>
 
-function InviteTeamMemberSkeleton() {
-  return (
-    <Card className="h-[260px]">
-      <CardHeader>
-        <CardTitle>Invite Team Member</CardTitle>
-      </CardHeader>
-    </Card>
-  );
-}
+      <section className='grid gap-4 lg:grid-cols-2'>
+        <Card className='border border-gray-200'>
+          <CardHeader>
+            <div className='flex items-center gap-2'>
+              <ShieldCheck className='h-5 w-5 text-orange-500' />
+              <CardTitle className='text-lg font-semibold text-gray-900'>
+                Plan guardrails
+              </CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className='space-y-2 text-sm text-gray-600'>
+            <p>
+              {plan === 'pro'
+                ? 'Enjoy unlimited runs across every studio plus Canva handoffs and saved projects.'
+                : 'Free plan includes 10 generations every 24 hours. Upgrade to unlock unlimited runs, saved projects, and premium studios.'}
+            </p>
+            <p>
+              Usage resets every 24 hours. We’ll surface upgrade prompts within
+              studios when you approach the limit.
+            </p>
+          </CardContent>
+        </Card>
 
-function InviteTeamMember() {
-  const { data: user } = useSWR<User>('/api/user', fetcher);
-  const isOwner = user?.role === 'owner';
-  const [inviteState, inviteAction, isInvitePending] = useActionState<
-    ActionState,
-    FormData
-  >(inviteTeamMember, {});
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Invite Team Member</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form action={inviteAction} className="space-y-4">
-          <div>
-            <Label htmlFor="email" className="mb-2">
-              Email
-            </Label>
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              placeholder="Enter email"
-              required
-              disabled={!isOwner}
-            />
-          </div>
-          <div>
-            <Label>Role</Label>
-            <RadioGroup
-              defaultValue="member"
-              name="role"
-              className="flex space-x-4"
-              disabled={!isOwner}
-            >
-              <div className="flex items-center space-x-2 mt-2">
-                <RadioGroupItem value="member" id="member" />
-                <Label htmlFor="member">Member</Label>
-              </div>
-              <div className="flex items-center space-x-2 mt-2">
-                <RadioGroupItem value="owner" id="owner" />
-                <Label htmlFor="owner">Owner</Label>
-              </div>
-            </RadioGroup>
-          </div>
-          {inviteState?.error && (
-            <p className="text-red-500">{inviteState.error}</p>
-          )}
-          {inviteState?.success && (
-            <p className="text-green-500">{inviteState.success}</p>
-          )}
-          <Button
-            type="submit"
-            className="bg-orange-500 hover:bg-orange-600 text-white"
-            disabled={isInvitePending || !isOwner}
-          >
-            {isInvitePending ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Inviting...
-              </>
-            ) : (
-              <>
-                <PlusCircle className="mr-2 h-4 w-4" />
-                Invite Member
-              </>
-            )}
-          </Button>
-        </form>
-      </CardContent>
-      {!isOwner && (
-        <CardFooter>
-          <p className="text-sm text-muted-foreground">
-            You must be a team owner to invite new members.
-          </p>
-        </CardFooter>
-      )}
-    </Card>
-  );
-}
-
-export default function SettingsPage() {
-  return (
-    <section className="flex-1 p-4 lg:p-8">
-      <h1 className="text-lg lg:text-2xl font-medium mb-6">Team Settings</h1>
-      <Suspense fallback={<SubscriptionSkeleton />}>
-        <ManageSubscription />
-      </Suspense>
-      <Suspense fallback={<TeamMembersSkeleton />}>
-        <TeamMembers />
-      </Suspense>
-      <Suspense fallback={<InviteTeamMemberSkeleton />}>
-        <InviteTeamMember />
-      </Suspense>
-    </section>
-  );
+        <Card className='border border-gray-200'>
+          <CardHeader>
+            <div className='flex items-center gap-2'>
+              <Sparkles className='h-5 w-5 text-orange-500' />
+              <CardTitle className='text-lg font-semibold text-gray-900'>
+                Getting the most from Studio 24
+              </CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className='space-y-2 text-sm text-gray-600'>
+            <ul className='list-disc space-y-2 pl-5'>
+              <li>
+                Start in Text Studio to lock in messaging, then repurpose and
+                storyboard for visual polish.
+              </li>
+              <li>
+                Save your best variants (Premium) so teams can republish
+                instantly.
+              </li>
+              <li>
+                Share upgrade-worthy wins with your stakeholders—anything that
+                saves hours gets logged here.
+              </li>
+            </ul>
+          </CardContent>
+        </Card>
+      </section>
+    </main>
+  )
 }
